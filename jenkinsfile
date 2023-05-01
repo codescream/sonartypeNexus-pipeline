@@ -1,0 +1,108 @@
+node {
+  stage('SCM') {
+    git 'https://github.com/awstechguide/spring-webapp.git'
+  }
+  stage('Make POM file'){
+           writeFile file: './pom.xml', text: '''<?xml version="1.0" encoding="UTF-8"?>
+        <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+        	<modelVersion>4.0.0</modelVersion>
+        	<parent>
+        		<groupId>org.springframework.boot</groupId>
+        		<artifactId>spring-boot-starter-parent</artifactId>
+        		<version>2.2.6.RELEASE</version>
+        		<relativePath/> <!-- lookup parent from repository -->
+        	</parent>
+        	<groupId>com.awstechguide</groupId>
+        	<artifactId>node-demo</artifactId>
+        	<version>0.0.1-SNAPSHOT</version>
+        	<packaging>war</packaging>
+        	<name>node-demo</name>
+        	<description>Demo project for Spring Boot</description>
+        
+        	<properties>
+        		<java.version>1.8</java.version>
+        	</properties>
+        
+        	<dependencies>
+        		<dependency>
+        			<groupId>org.springframework.boot</groupId>
+        			<artifactId>spring-boot-starter-web</artifactId>
+        		</dependency>
+        
+        		<dependency>
+        			<groupId>org.springframework.boot</groupId>
+        			<artifactId>spring-boot-devtools</artifactId>
+        			<scope>runtime</scope>
+        			<optional>true</optional>
+        		</dependency>
+        		<dependency>
+        			<groupId>org.springframework.boot</groupId>
+        			<artifactId>spring-boot-starter-tomcat</artifactId>
+        			<scope>provided</scope>
+        		</dependency>
+        		<!-- https://mvnrepository.com/artifact/javax.servlet/jstl -->
+        		<dependency>
+        		    <groupId>javax.servlet</groupId>
+        		    <artifactId>jstl</artifactId>
+        		    <version>1.2</version>
+        		</dependency>
+        		<!-- https://mvnrepository.com/artifact/org.apache.tomcat.embed/tomcat-embed-jasper -->
+        		<dependency>
+        		    <groupId>org.apache.tomcat.embed</groupId>
+        		    <artifactId>tomcat-embed-jasper</artifactId>
+        		    <version>9.0.34</version>
+        		</dependency>
+        		<dependency>
+        			<groupId>org.springframework.boot</groupId>
+        			<artifactId>spring-boot-starter-test</artifactId>
+        			<scope>test</scope>
+        			<exclusions>
+        				<exclusion>
+        					<groupId>org.junit.vintage</groupId>
+        					<artifactId>junit-vintage-engine</artifactId>
+        				</exclusion>
+        			</exclusions>
+        		</dependency>
+        	</dependencies>
+        
+        	<build>
+        		<plugins>
+        			<plugin>
+        				<groupId>org.springframework.boot</groupId>
+        				<artifactId>spring-boot-maven-plugin</artifactId>
+        			</plugin>
+        		</plugins>
+        		<finalName>${project.name}test</finalName>
+        	</build>
+        
+        </project>'''
+       }
+  stage('Build'){
+    sh 'mvn clean package'
+  }
+  stage('SonarQube analysis') {
+//          def scannerHome = tool 'SonarScanner 4.0';
+    withSonarQubeEnv('sonarqube-svr') { 
+    // If you have configured more than one global server connection, you can specify its name
+//              sh "${scannerHome}/bin/sonar-scanner"
+    sh "mvn sonar:sonar \
+    -D sonar.projectKey=test-project2"
+    }
+  }
+  stage("Quality Gate"){
+      timeout(time: 1, unit: 'HOURS') { // Just in case something goes wrong, pipeline will be killed after a timeout
+        def qg = waitForQualityGate() // Reuse taskId previously collected by withSonarQubeEnv
+        if (qg.status != 'OK') {
+            //error "Pipeline aborted due to quality gate failure: ${qg.status}"
+            emailext body: '''<p>STARTED: Job \'${env.JOB_NAME} [${env.BUILD_NUMBER}]\':</p>
+        <p>Check console output at &QUOT;<a href=\'${env.BUILD_URL}\'>${env.JOB_NAME} [${env.BUILD_NUMBER}]</a>&QUOT;</p>''', recipientProviders: [buildUser()], subject: 'STARTED: Job \'${env.JOB_NAME} [${env.BUILD_NUMBER}]\'', to: 'ogilom@gmail.com'
+            echo "pipeline failed"
+        }
+          
+      }
+  }
+  stage("Save Artifacts"){
+      nexusArtifactUploader artifacts: [[artifactId: 'node-demo', classifier: '', file: 'target/node-demotest.war', type: 'war']], credentialsId: 'nexus-jenkins', groupId: 'node-id', nexusUrl: '50.17.4.230:8081', nexusVersion: 'nexus3', protocol: 'http', repository: 'maven-snapshots', version: '1.0.0-SNAPSHOT'
+  }
+}
